@@ -29,36 +29,20 @@ App streams back, and sends all of it on every request. That is why neither appr
 ```bash
 dotnet run --project Api      # http://localhost:5288 (skills over MCP, plus /catalog and /pricing)
 dotnet run --project App      # http://localhost:5000 (set OpenAIClient:* in user secrets or appsettings)
-dotnet run --project Client   # interactive, talks to /chat
+dotnet run --project Client   # console chat against http://localhost:5000/chat
 ```
 
-Pick a setup with `--Endpoint`, and replay the same conversation with `--Script`:
+The Client targets `/chat`. To try another setup, point it at `/chat/subagent` or `/chat/ephemeral`.
 
-```bash
-dotnet run --project Client -- --Endpoint http://localhost:5000/chat           --Script Client/compare.txt
-dotnet run --project Client -- --Endpoint http://localhost:5000/chat/subagent  --Script Client/compare.txt
-dotnet run --project Client -- --Endpoint http://localhost:5000/chat/ephemeral --Script Client/compare.txt
-```
+## What the history looks like
 
-`Client/compare.txt` loads both skills in the first two turns, then has turns that need no skill, then turns that
-need the skills again.
+Illustrative and abridged; what the model writes will differ. One line per text, tool call or tool result, with
+`SKILL` marking skill content. `App/Extensions/HistoryFormatter.cs` renders a message list in this form if you want to
+look at one yourself (for example in the debugger: `HistoryFormatter.Format(messages)`).
 
-## Looking at the history
-
-There are two histories, and both are printed:
-
-- **What the Client keeps** (and uploads to App on every turn). Type `:history` in the Client; a `--Script` run
-  prints it at the end.
-- **What the model receives.** App logs it on every model call, including each step of the tool-calling loop
-  (logger `App.History`). For B this is the history after earlier skill content was stubbed.
-
-Each line is one content item: text, a tool call with its arguments, or a tool result with its size. Skill results
-are tagged `SKILL`. The examples below are illustrative and abridged (what the model writes, and so the sizes, will differ).
-
-**Baseline**: both skills, in full, on every call from now on:
+**Baseline**: after a few turns, both skills are still there in full, on every model call:
 
 ```
-[baseline] history sent to the model (12 messages):
   [0] user      Show me laptops under 1000.
   [1] assistant -> load_skill(skillName=catalog-search)
   [2] tool      <- load_skill SKILL (1290 chars): --- name: catalog-search description: Search the product catalog ...
@@ -71,20 +55,18 @@ are tagged `SKILL`. The examples below are illustrative and abridged (what the m
   ...
 ```
 
-**B: current turn only**: same structure; earlier skill results are stubs:
+**B: current turn only**: what the model receives has the same structure, but skill results from earlier turns are
+stubs. The Client's own history still holds the full text, because the stubbing happens in App just before the model.
 
 ```
-[ephemeral] history sent to the model (12 messages):
   [2] tool      <- load_skill SKILL (142 chars): [Skill 'catalog-search' was loaded in an earlier turn. Its content was removed ...
   [8] tool      <- load_skill SKILL (135 chars): [Skill 'pricing' was loaded in an earlier turn. Its content was removed ...
 ```
 
-The Client's `:history` still shows the full text here, because the stubbing happens in App, just before the model.
-
-**A: subagent**: no skills in the main conversation at all, only calls to the worker and its replies:
+**A: subagent**: the main conversation (and so the Client's history) never contains skill content, only calls to
+the worker and its replies:
 
 ```
-[subagent/main] history sent to the model (8 messages):
   [0] user      Show me laptops under 1000.
   [1] assistant -> skill_worker(query=Find laptops priced at or below 1000. Return names, ids and prices.)
   [2] tool      <- skill_worker (96 chars): Dell XPS 13 (id p_laptop_dell), $999.
@@ -92,7 +74,11 @@ The Client's `:history` still shows the full text here, because the stubbing hap
   [4] user      Is the Dell one on sale? What's the final price?
   [5] assistant -> skill_worker(query=Get the price and any active discount for product id p_laptop_dell ...)
   ...
-[subagent/worker] history sent to the model (4 messages):     <- a new, short history on every delegation
+```
+
+The worker starts a new, short history on every call, and that is the only place skills are loaded:
+
+```
   [0] user      Get the price and any active discount for product id p_laptop_dell ...
   [1] assistant -> load_skill(skillName=pricing)
   [2] tool      <- load_skill SKILL (1180 chars): ...
@@ -128,11 +114,9 @@ Things to watch:
 ## Layout
 
 ```
-Api/                                   MCP server with the skills, plus /catalog and /pricing
-App/Extensions/AIAgentBuilder.cs       builds the baseline, subagent and ephemeral agents
+Api/                                              MCP server with the skills, plus /catalog and /pricing
+App/Extensions/AIAgentBuilder.cs                  builds the baseline, subagent and ephemeral agents
+App/Extensions/HistoryFormatter.cs                renders a message list one line per item
 App/Agents/EarlierTurnSkillContentChatClient.cs   approach B
-App/Agents/HistoryLoggingChatClient.cs logs the history the model receives on each call
-Client/Program.cs                      console client (--Endpoint, --Script, :history)
-Shared/HistoryFormatter.cs             renders a history one line per item (linked into App and Client)
-Client/compare.txt                     conversation used for the comparison
+Client/                                           console test client
 ```

@@ -1,9 +1,0 @@
-# A fixed conversation for comparing the three setups. One user message per line; lines starting with # are skipped.
-# Turns 1-2 load both skills. Turns 3-5 need no new skill. Turns 6-7 need the skills again.
-Show me laptops under 1000.
-Is the Dell one on sale? What's the final price?
-Thanks. Which of those laptops would you pick for a student, and why?
-Summarise what we've talked about so far in two sentences.
-What questions should I ask before buying a laptop?
-Now find me running shoes.
-Are any of them discounted?

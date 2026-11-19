@@ -15,9 +15,4 @@
     </ItemGroup>
 
 
-  <ItemGroup>
-    <!-- Renders a message list for inspection; shared between App and Client. -->
-    <Compile Include="..\Shared\HistoryFormatter.cs" Link="Shared\HistoryFormatter.cs" />
-  </ItemGroup>
-
 </Project>

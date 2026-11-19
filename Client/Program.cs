@@ -1,24 +1,13 @@
 ﻿using AGUI.Client;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Shared;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-// Pick the setup to talk to with --Endpoint (default: the baseline):
-//   http://localhost:5000/chat            baseline: loaded skills stay in history
-//   http://localhost:5000/chat/subagent   approach A: skills isolated in a worker agent
-//   http://localhost:5000/chat/ephemeral  approach B: skill content kept for the current turn only
-// Replay a fixed conversation with --Script <file> (one user message per line) to compare setups on equal terms.
-// Type :history to print the conversation this Client keeps (and sends in full on every turn); a script prints it at
-// the end. The history the model actually receives is logged by App (category App.History).
-const string DefaultEndpoint = "http://localhost:5000/chat";
-
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureServices((context, services) =>
+    .ConfigureServices((_, services) =>
         {
             services.AddHttpClient("local");
             services.AddTransient<AIAgent>(provider =>
@@ -35,7 +24,7 @@ var host = Host.CreateDefaultBuilder(args)
 
 
                 var chatClient = new AGUIChatClient(
-                    new AGUIChatClientOptions(httpClient, context.Configuration["Endpoint"] ?? DefaultEndpoint)
+                    new AGUIChatClientOptions(httpClient, "http://localhost:5000/chat")
                     { 
                         JsonSerializerOptions = jsonSerializerOptions
                     });
@@ -56,47 +45,19 @@ var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 await using var scope = host.Services.CreateAsyncScope();
 var agent = scope.ServiceProvider.GetRequiredService<AIAgent>();
 var agentSession = await agent.CreateSessionAsync();
-var configuration = host.Services.GetRequiredService<IConfiguration>();
-Console.WriteLine($"Endpoint: {configuration["Endpoint"] ?? DefaultEndpoint}");
-
-// Scripted mode: send each non-empty, non-comment line of the file as a user message, then exit.
-Queue<string>? script = configuration["Script"] is { Length: > 0 } scriptPath
-    ? new Queue<string>(File.ReadAllLines(scriptPath).Where(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#')))
-    : null;
-
 List<ChatMessage> messages = [];
 while (!lifetime.ApplicationStopping.IsCancellationRequested)
 {
-    Console.Write("\nUser (:history, :q or quit to exit): ");
-    string? message;
-    if (script is null)
-    {
-        message = Console.ReadLine();
-    }
-    else
-    {
-        message = script.Count > 0 ? script.Dequeue() : "quit";
-        Console.WriteLine(message);
-    }
+    Console.Write("\nUser (:q or quit to exit): ");
+    var message = Console.ReadLine();
     if (string.IsNullOrWhiteSpace(message))
     {
         Console.WriteLine("Request cannot be empty.");
         continue;
     }
 
-    if (message is ":history")
-    {
-        PrintHistory();
-        continue;
-    }
-
     if (message is ":q" or "quit")
     {
-        if (script is not null)
-        {
-            PrintHistory();
-        }
-
         lifetime.StopApplication();
         break;
     }
@@ -161,19 +122,3 @@ while (!lifetime.ApplicationStopping.IsCancellationRequested)
 }
 
 await host.WaitForShutdownAsync(lifetime.ApplicationStopping);
-
-// The Client's ChatClientAgent keeps the conversation in its session (InMemoryChatHistoryProvider). AG-UI servers
-// are stateless, so this whole list, tool calls and results included, is sent to App on every turn.
-void PrintHistory()
-{
-    if (agentSession.TryGetInMemoryChatHistory(out var history))
-    {
-        Console.WriteLine($"\n--- Client history ({history.Count} messages, sent to App on every turn) ---");
-        Console.Write(HistoryFormatter.Format(history));
-        Console.WriteLine("---");
-    }
-    else
-    {
-        Console.WriteLine("\n(no history yet)");
-    }
-}

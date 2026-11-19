@@ -1,15 +1,14 @@
 using System.Text;
 using Microsoft.Extensions.AI;
 
-namespace Shared;
+namespace App.Extensions;
 
 /// <summary>
 /// Renders a message list one line per content item, so you can see what a history holds: who said what, which tools
 /// were called with which arguments, and how big each result is. Results of <c>load_skill</c> and
 /// <c>read_skill_resource</c> are tagged <c>SKILL</c> so you can see whether skill content stays in the history.
 /// </summary>
-/// <remarks>Linked into both App and Client.</remarks>
-public static class HistoryFormatter
+internal static class HistoryFormatter
 {
     private const int MaxPreview = 160;
 
