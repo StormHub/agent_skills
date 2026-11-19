@@ -100,7 +100,7 @@ does the difference.
 
 Things to watch:
 
-- **A depends on the brief.** The worker only sees the request string. `SubagentMainInstructions` tells the main
+- **A depends on the brief.** The worker only sees the request string. In `SubagentAgent`, `MainInstructions` tells the main
   agent to include product names, ids, budgets and preferences, and `WorkerInstructions` tells the worker to always
   return product ids so follow-ups ("is the second one on sale?") still work.
 - **A needs approvals off for the read-only skill tools.** A nested agent called as a tool can't surface an approval
@@ -113,10 +113,27 @@ Things to watch:
 
 ## Layout
 
+Each setup is its own keyed `AIAgent` singleton (keys in `AgentKeys`), registered in
+`DependencyInjection.AddAIAgent` and mapped to its endpoint in `Program.cs`:
+
+```csharp
+var agent = app.Services.GetRequiredKeyedService<AIAgent>(AgentKeys.Ephemeral);
+```
+
 ```
 Api/                                              MCP server with the skills, plus /catalog and /pricing
-App/Extensions/AIAgentBuilder.cs                  builds the baseline, subagent and ephemeral agents
+App/Agents/AgentKeys.cs                           DI keys: baseline, subagent, ephemeral
+App/Agents/BaselineAgent.cs                       baseline
+App/Agents/SubagentAgent.cs                       approach A
+App/Agents/EphemeralAgent.cs                      approach B
+App/Agents/EarlierTurnSkillContentChatClient.cs   approach B: stubs earlier skill content
+App/Agents/AgentComponents.cs                     shared instructions, skills provider, http_request tool
+App/Mcp/McpClientAccessor.cs                      shared MCP client, connected on first use
+App/Mcp/DeferredMcpSkillsSource.cs                MCP skills source that waits for that client
+App/Extensions/DependencyInjection.cs             registrations
 App/Extensions/HistoryFormatter.cs                renders a message list one line per item
-App/Agents/EarlierTurnSkillContentChatClient.cs   approach B
 Client/                                           console test client
 ```
+
+The MCP client connects on first use rather than at startup, because DI factories are synchronous. If the Api is not
+running, the first request fails and the next one tries again.

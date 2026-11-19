@@ -1,4 +1,6 @@
-﻿using Microsoft.Agents.AI;
+﻿using App.Agents;
+using App.Mcp;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Client;
 using OpenAI;
@@ -52,15 +54,15 @@ internal static class DependencyInjection
             {
                 client.BaseAddress = uri;
             }); 
-        services.AddSingleton(provider =>
-        {
-            var client = provider.GetRequiredService<IChatClient>();
-            return new AIAgentBuilder(
-                client,
-                provider.GetRequiredService<IHttpClientFactory>(),
-                uri,
-                provider.GetRequiredService<ILoggerFactory>());
-        });
+        services.AddSingleton(provider => new McpClientAccessor(
+            uri,
+            provider.GetRequiredService<IHttpClientFactory>(),
+            provider.GetRequiredService<ILoggerFactory>()));
+
+        // One agent per setup, told apart by key (see AgentKeys).
+        services.AddKeyedSingleton<AIAgent>(AgentKeys.Baseline, (provider, _) => BaselineAgent.Create(provider));
+        services.AddKeyedSingleton<AIAgent>(AgentKeys.Subagent, (provider, _) => SubagentAgent.Create(provider));
+        services.AddKeyedSingleton<AIAgent>(AgentKeys.Ephemeral, (provider, _) => EphemeralAgent.Create(provider));
 
         return services;
     }
