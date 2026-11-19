@@ -47,8 +47,7 @@ internal sealed class AIAgentBuilder(IChatClient chatClient, IHttpClientFactory 
     /// <summary>The original setup: every loaded skill is resent to the model on every later turn.</summary>
     private AIAgent BuildBaseline(McpClient mcpClient)
     {
-        var tally = new TokenTally("baseline");
-        return Instrument(chatClient, "baseline", tally).AsAIAgent(new ChatClientAgentOptions
+        return Instrument(chatClient, "baseline").AsAIAgent(new ChatClientAgentOptions
         {
             Name = "shopping_baseline",
             ChatOptions = new ChatOptions
@@ -68,9 +67,7 @@ internal sealed class AIAgentBuilder(IChatClient chatClient, IHttpClientFactory 
     /// </summary>
     private AIAgent BuildSubagent(McpClient mcpClient)
     {
-        var tally = new TokenTally("subagent");
-
-        AIAgent worker = Instrument(chatClient, "subagent/worker", tally).AsAIAgent(new ChatClientAgentOptions
+        AIAgent worker = Instrument(chatClient, "subagent/worker").AsAIAgent(new ChatClientAgentOptions
         {
             Name = "skill_worker",
             Description = WorkerDescription,
@@ -82,7 +79,7 @@ internal sealed class AIAgentBuilder(IChatClient chatClient, IHttpClientFactory 
             AIContextProviders = [CreateSkillsProvider(mcpClient)],
         });
 
-        return Instrument(chatClient, "subagent/main", tally).AsAIAgent(new ChatClientAgentOptions
+        return Instrument(chatClient, "subagent/main").AsAIAgent(new ChatClientAgentOptions
         {
             Name = "shopping_subagent",
             ChatOptions = new ChatOptions
@@ -101,15 +98,13 @@ internal sealed class AIAgentBuilder(IChatClient chatClient, IHttpClientFactory 
     /// </summary>
     private AIAgent BuildEphemeral(McpClient mcpClient)
     {
-        var tally = new TokenTally("ephemeral");
-
         // ChatClientBuilder.Use: the first registration is the outermost. The agent adds its own
         // FunctionInvokingChatClient on top, so this pipeline runs for every model call, inside the tool loop too:
-        //   FunctionInvokingChatClient -> EarlierTurnSkillContentChatClient -> UsageLoggingChatClient -> model
+        //   FunctionInvokingChatClient -> EarlierTurnSkillContentChatClient -> HistoryLoggingChatClient -> model
         IChatClient client = chatClient
             .AsBuilder()
             .Use(inner => new EarlierTurnSkillContentChatClient(inner))
-            .Use(inner => new UsageLoggingChatClient(inner, "ephemeral", tally, loggerFactory))
+            .Use(inner => new HistoryLoggingChatClient(inner, "ephemeral", loggerFactory))
             .Build();
 
         return client.AsAIAgent(new ChatClientAgentOptions
@@ -124,9 +119,10 @@ internal sealed class AIAgentBuilder(IChatClient chatClient, IHttpClientFactory 
         });
     }
 
-    private IChatClient Instrument(IChatClient client, string label, TokenTally tally) =>
+    // Logs the history each model call receives, labelled with the setup it belongs to.
+    private IChatClient Instrument(IChatClient client, string label) =>
         client.AsBuilder()
-            .Use(inner => new UsageLoggingChatClient(inner, label, tally, loggerFactory))
+            .Use(inner => new HistoryLoggingChatClient(inner, label, loggerFactory))
             .Build();
 
     private async Task<McpClient> CreateMcpClient(CancellationToken cancellationToken) =>

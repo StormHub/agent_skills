@@ -43,23 +43,63 @@ dotnet run --project Client -- --Endpoint http://localhost:5000/chat/ephemeral -
 `Client/compare.txt` loads both skills in the first two turns, then has turns that need no skill, then turns that
 need the skills again.
 
-## Reading the comparison
+## Looking at the history
 
-App logs one line per model call (logger `App.Usage`):
+There are two histories, and both are printed:
+
+- **What the Client keeps** (and uploads to App on every turn). Type `:history` in the Client; a `--Script` run
+  prints it at the end.
+- **What the model receives.** App logs it on every model call, including each step of the tool-calling loop
+  (logger `App.History`). For B this is the history after earlier skill content was stubbed.
+
+Each line is one content item: text, a tool call with its arguments, or a tool result with its size. Skill results
+are tagged `SKILL`. The examples below are illustrative and abridged (what the model writes, and so the sizes, will differ).
+
+**Baseline**: both skills, in full, on every call from now on:
 
 ```
-[ephemeral] model call: 9 messages, ~2140 chars sent (310 in tool results, 236 of them skill content); tokens in/out: 812/95. ephemeral totals after 6 calls: 4630 in / 610 out
+[baseline] history sent to the model (12 messages):
+  [0] user      Show me laptops under 1000.
+  [1] assistant -> load_skill(skillName=catalog-search)
+  [2] tool      <- load_skill SKILL (1290 chars): --- name: catalog-search description: Search the product catalog ...
+  [3] assistant -> http_request(method=GET, path=/catalog?q=laptop&maxPrice=1000)
+  [4] tool      <- http_request (210 chars): HTTP 200 [{"id":"p_laptop_dell","name":"Dell XPS 13",...
+  [5] assistant Here is a laptop under $1000: Dell XPS 13 ...
+  [6] user      Is the Dell one on sale? What's the final price?
+  [7] assistant -> load_skill(skillName=pricing)
+  [8] tool      <- load_skill SKILL (1180 chars): --- name: pricing description: Get the list price, active promotion ...
+  ...
 ```
 
-- **Skill content** is measured on what is actually sent. In the baseline it grows with each skill loaded and stays
-  there. In B it drops to the stub size once the turn that loaded the skill is over. In A it is zero on
-  `subagent/main` and appears only on `subagent/worker`.
-- **Totals** add up every model call for the setup. Subagent totals include the worker's calls. Restart App between
-  runs to reset them.
-- Token counts come from the provider's usage report; `n/a` means it didn't send one.
+**B: current turn only**: same structure; earlier skill results are stubs:
 
-The demo skills are small (about 1.2 KB each), so the difference here is modest. It scales with the size of SKILL.md
-and with the number of turns after a skill is loaded.
+```
+[ephemeral] history sent to the model (12 messages):
+  [2] tool      <- load_skill SKILL (142 chars): [Skill 'catalog-search' was loaded in an earlier turn. Its content was removed ...
+  [8] tool      <- load_skill SKILL (135 chars): [Skill 'pricing' was loaded in an earlier turn. Its content was removed ...
+```
+
+The Client's `:history` still shows the full text here, because the stubbing happens in App, just before the model.
+
+**A: subagent**: no skills in the main conversation at all, only calls to the worker and its replies:
+
+```
+[subagent/main] history sent to the model (8 messages):
+  [0] user      Show me laptops under 1000.
+  [1] assistant -> skill_worker(query=Find laptops priced at or below 1000. Return names, ids and prices.)
+  [2] tool      <- skill_worker (96 chars): Dell XPS 13 (id p_laptop_dell), $999.
+  [3] assistant Here is a laptop under $1000: Dell XPS 13 ...
+  [4] user      Is the Dell one on sale? What's the final price?
+  [5] assistant -> skill_worker(query=Get the price and any active discount for product id p_laptop_dell ...)
+  ...
+[subagent/worker] history sent to the model (4 messages):     <- a new, short history on every delegation
+  [0] user      Get the price and any active discount for product id p_laptop_dell ...
+  [1] assistant -> load_skill(skillName=pricing)
+  [2] tool      <- load_skill SKILL (1180 chars): ...
+```
+
+The demo skills are small (about 1.2 KB each). With real skills the baseline's `SKILL` lines get much bigger, and so
+does the difference.
 
 ## Trade-offs
 
@@ -91,7 +131,8 @@ Things to watch:
 Api/                                   MCP server with the skills, plus /catalog and /pricing
 App/Extensions/AIAgentBuilder.cs       builds the baseline, subagent and ephemeral agents
 App/Agents/EarlierTurnSkillContentChatClient.cs   approach B
-App/Agents/UsageLoggingChatClient.cs   per-call logging and totals used for the comparison
-Client/Program.cs                      console client (--Endpoint, --Script)
+App/Agents/HistoryLoggingChatClient.cs logs the history the model receives on each call
+Client/Program.cs                      console client (--Endpoint, --Script, :history)
+Shared/HistoryFormatter.cs             renders a history one line per item (linked into App and Client)
 Client/compare.txt                     conversation used for the comparison
 ```
