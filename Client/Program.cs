@@ -1,13 +1,21 @@
 ﻿using AGUI.Client;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+// Pick the setup to talk to with --Endpoint (default: the baseline):
+//   http://localhost:5000/chat            baseline: loaded skills stay in history
+//   http://localhost:5000/chat/subagent   approach A: skills isolated in a worker agent
+//   http://localhost:5000/chat/ephemeral  approach B: skill content kept for the current turn only
+// Replay a fixed conversation with --Script <file> (one user message per line) to compare setups on equal terms.
+const string DefaultEndpoint = "http://localhost:5000/chat";
+
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureServices((_, services) =>
+    .ConfigureServices((context, services) =>
         {
             services.AddHttpClient("local");
             services.AddTransient<AIAgent>(provider =>
@@ -24,7 +32,7 @@ var host = Host.CreateDefaultBuilder(args)
 
 
                 var chatClient = new AGUIChatClient(
-                    new AGUIChatClientOptions(httpClient, "http://localhost:5000/chat")
+                    new AGUIChatClientOptions(httpClient, context.Configuration["Endpoint"] ?? DefaultEndpoint)
                     { 
                         JsonSerializerOptions = jsonSerializerOptions
                     });
@@ -45,11 +53,28 @@ var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 await using var scope = host.Services.CreateAsyncScope();
 var agent = scope.ServiceProvider.GetRequiredService<AIAgent>();
 var agentSession = await agent.CreateSessionAsync();
+var configuration = host.Services.GetRequiredService<IConfiguration>();
+Console.WriteLine($"Endpoint: {configuration["Endpoint"] ?? DefaultEndpoint}");
+
+// Scripted mode: send each non-empty, non-comment line of the file as a user message, then exit.
+Queue<string>? script = configuration["Script"] is { Length: > 0 } scriptPath
+    ? new Queue<string>(File.ReadAllLines(scriptPath).Where(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#')))
+    : null;
+
 List<ChatMessage> messages = [];
 while (!lifetime.ApplicationStopping.IsCancellationRequested)
 {
     Console.Write("\nUser (:q or quit to exit): ");
-    var message = Console.ReadLine();
+    string? message;
+    if (script is null)
+    {
+        message = Console.ReadLine();
+    }
+    else
+    {
+        message = script.Count > 0 ? script.Dequeue() : "quit";
+        Console.WriteLine(message);
+    }
     if (string.IsNullOrWhiteSpace(message))
     {
         Console.WriteLine("Request cannot be empty.");
